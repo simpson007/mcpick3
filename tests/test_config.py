@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from mcpick3.config import get_mcp_token
+from mcpick3.mcp_client import _redact_secret
 
 
 class ConfigTests(unittest.TestCase):
@@ -28,3 +29,7 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, {}, clear=True):
             (Path(root) / ".env.local").write_text("MCD_MCP_TOKEN=$(echo fixture)\n", encoding="utf-8")
             self.assertEqual(get_mcp_token(Path(root)), "$(echo fixture)")
+
+    def test_redacts_token_from_diagnostic_message(self):
+        self.assertEqual(_redact_secret("HTTP error token=secret-value", "secret-value"),
+                         "HTTP error token=<redacted>")

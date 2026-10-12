@@ -82,6 +82,24 @@ class McdMcpClient:
     def initialize(self) -> Any:
         return self._rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "mcpick3", "version": "0.3.0"}})
 
+    def diagnostics(self, city: str, keyword: str, *, be_type: int = 1) -> dict[str, Any]:
+        """Run a read-only connection self-check without exposing credentials."""
+        if not self.token:
+            return {"ok": False, "stage": "config", "message": "未检测到 MCD_MCP_TOKEN"}
+        try:
+            self.initialize()
+            stores = self.search_stores(city, keyword, be_type=be_type)
+            first = stores[0] if stores else {}
+            return {
+                "ok": True,
+                "stage": "query-nearby-stores",
+                "message": "官方 MCP 连接正常",
+                "store_count": len(stores),
+                "sample_store": {"name": first.get("storeName", ""), "code": first.get("storeCode", "")},
+            }
+        except (McdMcpError, OSError, ValueError) as exc:
+            return {"ok": False, "stage": "network", "message": _redact_secret(str(exc), self.token)}
+
     def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
         result = self._rpc("tools/call", {"name": name, "arguments": arguments or {}})
         if isinstance(result, dict) and (result.get("isError") is True or result.get("success") is False):
@@ -246,6 +264,13 @@ def _retryable_request(method: str, params: dict[str, Any] | None) -> bool:
         return False
     tool = (params or {}).get("name", "")
     return tool in {"query-nearby-stores", "query-meals", "query-meal-detail", "calculate-price", "query-my-coupons", "query-store-coupons", "list-nutrition-foods"}
+
+
+def _redact_secret(message: str, secret: str | None) -> str:
+    """Never echo a credential if an upstream error accidentally includes it."""
+    if secret:
+        return message.replace(secret, "<redacted>")
+    return message
 
 
 def _parse_mcp_payload(raw: str) -> Any:

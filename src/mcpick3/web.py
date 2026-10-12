@@ -72,6 +72,9 @@ class Handler(BaseHTTPRequestHandler):
                 client = McdMcpClient()
                 client.initialize()
                 self._send({"stores": client.search_stores(city, keyword)})
+            elif path == "/api/diagnostics":
+                client = McdMcpClient()
+                self._send(client.diagnostics(city, keyword))
             elif path == "/api/recommend":
                 source = data.get("source", "demo")
                 if source not in {"demo", "live"}:
