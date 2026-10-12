@@ -60,3 +60,11 @@ class DecisionEngineTest(unittest.TestCase):
         self.assertIn("kcal", share["text"])
         self.assertNotIn("Token", share["text"])
         self.assertNotIn("storeCode", share["text"])
+
+    def test_service_explains_tradeoffs(self):
+        result = recommendations(UserConstraints(35, 700, minutes=25))
+        self.assertIn("cheapest", result["decision_summary"])
+        self.assertIn("lightest", result["decision_summary"])
+        for card in result["cards"]:
+            self.assertIn("delta_vs_cheapest", card)
+            self.assertIn("delta_kcal_vs_lightest", card)

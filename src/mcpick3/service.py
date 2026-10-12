@@ -67,11 +67,32 @@ def recommendations(constraints: UserConstraints, *, live: bool = False, city: s
         if context.get("be_code"):
             value["draft"]["beCode"] = context["be_code"]
         serialized.append(value)
+    decision_summary = _decision_summary(serialized)
     return {
         "source": "live" if live else "demo", "store": store,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "cards": serialized, "warnings": warnings,
+        "cards": serialized, "warnings": warnings, "decision_summary": decision_summary,
         "coverage": {"recommended_meals": len(engine.meals), "cards": len(serialized)},
+    }
+
+
+def _decision_summary(cards: list[dict[str, Any]]) -> dict[str, Any]:
+    """Create a compact, deterministic explanation of the trade-offs."""
+    if not cards:
+        return {"text": "暂时没有可比较的方案。", "cheapest": None, "lightest": None}
+    cheapest = min(cards, key=lambda card: (card.get("total", float("inf")), card.get("kcal", float("inf"))))
+    lightest = min(cards, key=lambda card: (card.get("kcal", float("inf")), card.get("total", float("inf"))))
+    for card in cards:
+        card["delta_vs_cheapest"] = round(card.get("total", 0) - cheapest.get("total", 0), 2)
+        card["delta_kcal_vs_lightest"] = round(card.get("kcal", 0) - lightest.get("kcal", 0))
+    if cheapest["mode"] == lightest["mode"]:
+        text = f"{cheapest['title']}同时最省钱、热量最低。"
+    else:
+        text = f"想少花钱选「{cheapest['title']}」；想少吃负担选「{lightest['title']}」。"
+    return {
+        "text": text,
+        "cheapest": {"mode": cheapest["mode"], "title": cheapest["title"], "total": cheapest["total"]},
+        "lightest": {"mode": lightest["mode"], "title": lightest["title"], "kcal": lightest["kcal"]},
     }
 
 
