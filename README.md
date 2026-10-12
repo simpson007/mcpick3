@@ -28,6 +28,13 @@ mcpick3 --budget 35 --kcal 700 --minutes 25
 mcpick3 --budget 35 --kcal 700 --format json
 ```
 
+启动一个零依赖的本地演示页面（适合录制参赛 Demo）：
+
+```bash
+mcpick3-web
+# 浏览器打开 http://127.0.0.1:8765
+```
+
 ## 目标用户
 
 - 工作日只有 20–30 分钟午休的上班族
