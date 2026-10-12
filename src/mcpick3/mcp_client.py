@@ -68,18 +68,36 @@ class McdMcpClient:
     def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
         return self._rpc("tools/call", {"name": name, "arguments": arguments or {}})
 
-    def calculate_price(self, store_id: str, items: list[dict[str, Any]], coupon_id: str | None = None) -> Any:
+    def calculate_price(
+        self,
+        store_id: str,
+        items: list[dict[str, Any]],
+        coupon_id: str | None = None,
+        *,
+        be_type: int = 1,
+        be_code: str | None = None,
+        order_type: int = 1,
+        need_tableware: bool = False,
+    ) -> Any:
         """Ask the official server for the final, store-specific payable amount."""
-        args: dict[str, Any] = {"storeId": store_id, "items": items}
-        if coupon_id:
-            args["couponId"] = coupon_id
+        args: dict[str, Any] = {"storeCode": store_id, "items": items, "beType": be_type, "orderType": order_type, "needTableware": need_tableware}
+        if be_code:
+            args["beCode"] = be_code
+        if coupon_id and items:
+            items = [dict(items[0], couponId=coupon_id), *items[1:]]
+            args["items"] = items
         return self.call_tool("calculate-price", args)
 
-    def create_order(self, store_id: str, items: list[dict[str, Any]], dining_type: str = "pickup", *, confirm: bool = False) -> Any:
+    def create_order(self, store_id: str, items: list[dict[str, Any]], dining_type: str = "pickup", *, confirm: bool = False, be_type: int = 1, be_code: str | None = None, order_type: int = 1, take_way_code: str | None = None) -> Any:
         """Create an order only after the caller has explicitly confirmed it."""
         if not confirm:
             raise ValueError("创建订单前必须传入 confirm=True；McPick3 默认只生成订单草稿")
-        return self.call_tool("create-order", {"storeId": store_id, "items": items, "diningType": dining_type})
+        args: dict[str, Any] = {"storeCode": store_id, "items": items, "beType": be_type, "orderType": order_type}
+        if be_code:
+            args["beCode"] = be_code
+        if take_way_code:
+            args["takeWayCode"] = take_way_code
+        return self.call_tool("create-order", args)
 
     def recommend_context(
         self,
