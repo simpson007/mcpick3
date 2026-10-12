@@ -11,6 +11,8 @@ from .mcp_client import McdMcpClient, McdMcpError
 from .models import UserConstraints
 from .service import recommendations
 
+APP_VERSION = "0.2.0"
+
 
 class Handler(BaseHTTPRequestHandler):
     def _local_request(self) -> bool:
@@ -37,7 +39,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/":
             self._send(files("mcpick3").joinpath("index.html").read_bytes(), content_type="text/html; charset=utf-8")
         elif path == "/api/status":
-            self._send({"token_configured": bool(get_mcp_token()), "order_creation_enabled": False})
+            self._send({"app": "McPick3", "version": APP_VERSION,
+                        "token_configured": bool(get_mcp_token()), "order_creation_enabled": False})
         elif path == "/api/cards":
             # Backward-compatible demo-only GET endpoint; live requests require POST.
             query = parse_qs(urlparse(self.path).query)
@@ -77,10 +80,16 @@ class Handler(BaseHTTPRequestHandler):
                                               str(data.get("mode", "pickup")), int(data.get("minutes", 25)))
                 if source == "live" and (not city.strip() or not keyword.strip()):
                     raise ValueError("实时模式请同时输入城市和位置关键词")
+                exclude = data.get("exclude")
+                if exclude is not None and (not isinstance(exclude, list) or
+                                            any(not isinstance(group, list) or len(group) > 12 for group in exclude)):
+                    raise ValueError("exclude 应为餐品编码数组")
+                replacement = data.get("replacement")
+                if replacement is not None and not isinstance(replacement, dict):
+                    raise ValueError("replacement 应为对象")
                 result = recommendations(constraints, live=source == "live", city=city, keyword=keyword,
                                          store_code=str(data["storeCode"]) if data.get("storeCode") else None,
-                                         exclude=data.get("exclude") if isinstance(data.get("exclude"), list) else None,
-                                         replacement=data.get("replacement") if isinstance(data.get("replacement"), dict) else None)
+                                         exclude=exclude, replacement=replacement)
                 self._send(result)
             else:
                 self._send({"error": "路径不存在；当前网页仅提供查询和草稿"}, 404)
