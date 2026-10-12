@@ -5,7 +5,7 @@ from .models import DecisionCard
 
 
 def render_markdown(cards: list[DecisionCard]) -> str:
-    lines = ["# 麦麦三问 · 今日决策卡", "", "> 营养信息、价格与供应状态以麦当劳官方实时结果为准。", ""]
+    lines = ["# 今天吃啥？· McPick3", "", "> 刚刚查到的门店结果，价格和供应以官方实时数据为准。", ""]
     for card in cards:
         c = card.candidate
         official = c.official_price or {}

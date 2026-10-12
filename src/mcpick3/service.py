@@ -15,20 +15,20 @@ def recommendations(constraints: UserConstraints, *, live: bool = False, city: s
     constraints.validate()
     if constraints.pickup_mode == "delivery":
         raise ValueError("外送功能尚未接入，请选择到店取餐或堂食")
-    warnings = ["取餐时间为用户偏好：官方接口没有提供实时出餐 ETA，本版本不承诺指定分钟内完成。"]
+    warnings = ["时间只用来帮你筛选，实际出餐以门店现场为准。"]
     if live:
         client = client or McdMcpClient()
         context = client.recommend_context(city=city, keyword=keyword, store_code=store_code, be_type=be_type)
         engine = DecisionEngine.from_context(context)
         cards = engine.generate(constraints, verifier=lambda c: client.verify_candidate_model(context, c))
         store = context["selected_store"]
-        warnings.append("仅推荐营养信息完整且通过详情与价格校验的单品组合；套餐、未知营养和优惠券自动搭配尚未启用。")
+        warnings.append("这次只挑了营养信息完整、刚刚校过价的单品；套餐和优惠券组合还没算进去。")
     else:
         context = DemoMcpClient().recommend_context()
         engine = DecisionEngine.from_context(context)
         cards = engine.generate(constraints)
         store = {"storeCode": "demo-store", "storeName": "演示门店", "address": "本地样本，不代表真实供应"}
-        warnings.append("演示模式使用虚构价格、营养与优惠，不是官方查询结果。")
+        warnings.append("现在是演示数据；切到实时 MCP 才会查真实门店和价格。")
     serialized = []
     for card in cards:
         value = card.to_dict()

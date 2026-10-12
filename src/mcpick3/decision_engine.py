@@ -28,9 +28,9 @@ class DecisionEngine:
         if not candidates:
             raise ValueError("没有同时满足预算和热量上限的可售组合，请放宽一个条件")
         modes = [
-            ("save", "省钱优先", "把优惠用在刀刃上"),
-            ("balance", "均衡优先", "价格、能量与蛋白质的折中解"),
-            ("mood", "心情优先", "更有满足感的一餐"),
+            ("save", "省钱党", "能省就省，别委屈自己"),
+            ("balance", "稳妥一餐", "价格、能量都不冒险"),
+            ("mood", "今天就吃它", "想吃的那口，直接安排"),
         ]
         cards: list[DecisionCard] = []
         used: set[tuple[str, ...]] = set()
@@ -134,15 +134,15 @@ class DecisionEngine:
 
     @staticmethod
     def _reasons(candidate: Candidate, c: UserConstraints, mode: str) -> list[str]:
-        reasons = [f"总价 ¥{candidate.total:.2f}，预算还剩 ¥{c.budget - candidate.total:.2f}", f"约 {candidate.kcal:.0f} kcal，不超过 {c.kcal_limit:.0f} kcal 上限"]
+        reasons = [f"¥{candidate.total:.2f}，还剩 ¥{c.budget - candidate.total:.2f}", f"约 {candidate.kcal:.0f} kcal，在你的范围内"]
         if candidate.coupon:
-            reasons.append(f"已匹配「{candidate.coupon.title}」，优惠 ¥{candidate.discount:.2f}")
+            reasons.append(f"用了「{candidate.coupon.title}」，省 ¥{candidate.discount:.2f}")
         if mode == "balance":
-            reasons.append(f"蛋白质约 {candidate.protein:.1f} g，适合想吃得更均衡时")
+            reasons.append(f"蛋白质约 {candidate.protein:.1f} g，整体比较稳")
         elif mode == "mood":
-            reasons.append("保留更有满足感的口味组合")
+            reasons.append("想吃的口味，今天就别换了")
         else:
-            reasons.append("优先降低实际支付金额")
+            reasons.append("先把价格压下来")
         return reasons
 
     @staticmethod
