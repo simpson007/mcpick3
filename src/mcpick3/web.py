@@ -11,7 +11,7 @@ from .mcp_client import McdMcpClient, McdMcpError
 from .models import UserConstraints
 from .service import recommendations
 
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.3.0"
 
 
 class Handler(BaseHTTPRequestHandler):

@@ -3,7 +3,7 @@ import unittest
 from mcpick3.decision_engine import DecisionEngine
 from mcpick3.mcp_client import DemoMcpClient
 from mcpick3.models import ReplacementRequest, UserConstraints
-from mcpick3.service import _detail_summary
+from mcpick3.service import _detail_summary, recommendations
 
 
 class DecisionEngineTest(unittest.TestCase):
@@ -51,3 +51,12 @@ class DecisionEngineTest(unittest.TestCase):
         self.assertEqual(summary["name"], "示例套餐")
         self.assertEqual(summary["defaults"][0]["code"], "d2")
         self.assertEqual(summary["options"][0]["choices"][1]["name"], "可乐")
+
+    def test_service_adds_share_payload_without_account_data(self):
+        result = recommendations(UserConstraints(35, 700, minutes=25))
+        self.assertEqual(len(result["cards"]), 3)
+        share = result["cards"][0]["share"]
+        self.assertIn("今天我是：", share["headline"])
+        self.assertIn("kcal", share["text"])
+        self.assertNotIn("Token", share["text"])
+        self.assertNotIn("storeCode", share["text"])

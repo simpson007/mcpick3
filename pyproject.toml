@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcpick3"
-version = "0.2.0"
+version = "0.3.0"
 description = "麦麦三问 McPick3：基于麦当劳 MCP 的可解释点餐决策卡"
 readme = "README.md"
 requires-python = ">=3.10"

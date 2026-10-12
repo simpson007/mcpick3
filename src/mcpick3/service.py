@@ -39,6 +39,23 @@ def recommendations(constraints: UserConstraints, *, live: bool = False, city: s
     serialized = []
     for card in cards:
         value = card.to_dict()
+        # Keep the share layer deterministic and free of account/location data.
+        # The browser can turn this compact payload into a PNG or clipboard text.
+        savings_percent = 0.0
+        if value["subtotal"] > 0:
+            savings_percent = round(value["discount"] / value["subtotal"] * 100, 1)
+        share_tag = {
+            "save": "月底也能吃得明白",
+            "balance": "稳稳吃饱，不乱花",
+            "mood": "今天就该吃这口",
+        }.get(value["mode"], "今天这样点")
+        value["savings_percent"] = savings_percent
+        value["share"] = {
+            "headline": f"今天我是：{value['title']}",
+            "tagline": share_tag,
+            "text": (f"{value['title']}｜{' + '.join(value['items'])}｜"
+                      f"¥{value['total']:.2f}｜约 {value['kcal']} kcal\n{share_tag}"),
+        }
         value["details"] = [_detail_summary(d.get("data", d)) for d in card.candidate.details]
         items = card.candidate.order_items or [{"productCode": m.id, "quantity": 1} for m in card.candidate.meals]
         value["draft"] = {
