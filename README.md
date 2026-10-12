@@ -50,6 +50,22 @@ mcpick3-web
 export MCD_MCP_TOKEN='YOUR_MCP_TOKEN'
 ```
 
+独立终端的 `export` 不会同步给 Codex 的命令进程。若需跨进程调试，可在已设置
+Token 的终端中保存到项目目录下的 `.env.local`（已被 Git 忽略）：
+
+```bash
+cd /Users/yushenjian/Downloads/mchina
+if [ -n "$MCD_MCP_TOKEN" ]; then
+  (umask 077; printf 'MCD_MCP_TOKEN=%s\n' "$MCD_MCP_TOKEN" > .env.local)
+  chmod 600 .env.local
+  echo '本地凭证已保存'
+else
+  echo '请先在此终端设置 MCD_MCP_TOKEN'
+fi
+```
+
+环境变量优先于本地文件。请勿分享或提交 `.env.local`。
+
 3. 连接官方 Streamable HTTP Server：
 
 ```bash
@@ -82,7 +98,7 @@ src/mcpick3/
 
 ## 合规与隐私
 
-- `MCD_MCP_TOKEN` 只从环境变量读取；仓库不保存真实 Token。
+- Token 从环境变量或已忽略的 `.env.local` 读取；Git 仓库不保存真实 Token。
 - 不写入手机号、地址等个人信息。
 - 创建订单前必须用户确认。
 - 营养信息仅作点餐参考，不构成医疗、营养或其他专业建议。

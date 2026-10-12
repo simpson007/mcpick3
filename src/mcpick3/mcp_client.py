@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
-import os
 import urllib.error
 import urllib.request
 from typing import Any
 
 from .models import Coupon, Meal
+from .config import get_mcp_token
 
 
 class McdMcpError(RuntimeError):
@@ -17,12 +17,12 @@ class McdMcpClient:
     """Small dependency-free Streamable HTTP MCP client.
 
     It intentionally exposes only the operations used by McPick3. The token is
-    read at runtime from MCD_MCP_TOKEN and is never written to disk.
+    read at runtime from MCD_MCP_TOKEN or a user-created ignored .env.local.
     """
 
     def __init__(self, url: str = "https://mcp.mcd.cn", token: str | None = None, timeout: int = 20):
         self.url = url.rstrip("/")
-        self.token = token or os.getenv("MCD_MCP_TOKEN")
+        self.token = token or get_mcp_token()
         self.timeout = timeout
         self.session_id: str | None = None
         self._request_id = 0
