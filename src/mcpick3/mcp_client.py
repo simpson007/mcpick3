@@ -2,11 +2,8 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import urllib.error
 import urllib.request
-import uuid
-from dataclasses import asdict
 from typing import Any
 
 from .models import Coupon, Meal
@@ -59,7 +56,11 @@ class McdMcpClient:
         result = _parse_mcp_payload(raw)
         if isinstance(result, dict) and result.get("error"):
             raise McdMcpError(str(result["error"]))
-        return result.get("result", result) if isinstance(result, dict) else result
+        result = result.get("result", result) if isinstance(result, dict) else result
+        # MCD returns a typed structuredContent envelope alongside Markdown.
+        if isinstance(result, dict) and result.get("structuredContent") is not None:
+            return result["structuredContent"]
+        return result
 
     def initialize(self) -> Any:
         return self._rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "mcpick3", "version": "0.1.0"}})
@@ -80,20 +81,49 @@ class McdMcpClient:
             raise ValueError("创建订单前必须传入 confirm=True；McPick3 默认只生成订单草稿")
         return self.call_tool("create-order", {"storeId": store_id, "items": items, "diningType": dining_type})
 
-    def recommend_context(self, location: str | None = None) -> dict[str, Any]:
+    def recommend_context(
+        self,
+        location: str | None = None,
+        *,
+        city: str | None = None,
+        keyword: str | None = None,
+        be_type: int = 1,
+    ) -> dict[str, Any]:
         """Fetch the MCP data needed by the decision engine.
 
         Tool argument schemas can evolve; callers may pass a prebuilt context to
         the engine when the MCP service returns a schema-specific response.
         """
         self.initialize()
-        stores = self.call_tool("query-nearby-stores", {"address": location} if location else {})
-        store_id = _first_id(stores, "storeId", "id")
-        meals = self.call_tool("query-meals", {"storeId": store_id} if store_id else {})
-        coupons = self.call_tool("query-my-coupons", {"storeId": store_id} if store_id else {})
-        store_coupons = self.call_tool("query-store-coupons", {"storeId": store_id} if store_id else {})
+        if city or keyword or location:
+            city = city or location
+            keyword = keyword or location
+            store_args: dict[str, Any] = {"searchType": 2, "beType": be_type, "city": city, "keyword": keyword}
+        else:
+            store_args = {"searchType": 1, "beType": be_type}
+        stores = self.call_tool("query-nearby-stores", store_args)
+        if isinstance(stores, dict) and stores.get("success") is False:
+            raise McdMcpError(f"查询门店失败：{stores.get('message', '未知错误')}")
+        store_rows = _data_list(stores)
+        if not store_rows:
+            raise McdMcpError("没有找到可用门店；请同时提供城市和附近位置关键词")
+        first_store = store_rows[0]
+        store_id = _first_id(first_store, "storeCode", "storeId", "id")
+        if not store_id:
+            raise McdMcpError("门店响应缺少 storeCode")
+        be_code = first_store.get("beCode") if isinstance(first_store, dict) else None
+        order_type = 1 if be_type in (1, 5) else 2
+        meal_args: dict[str, Any] = {"storeCode": store_id, "orderType": order_type, "beType": be_type}
+        if be_code:
+            meal_args["beCode"] = be_code
+        meals = self.call_tool("query-meals", meal_args)
+        coupons = self.call_tool("query-my-coupons", {"page": "1", "pageSize": "200"})
+        coupon_args: dict[str, Any] = {"storeCode": store_id, "orderType": order_type, "beType": be_type}
+        if be_code:
+            coupon_args["beCode"] = be_code
+        store_coupons = self.call_tool("query-store-coupons", coupon_args)
         nutrition = self.call_tool("list-nutrition-foods", {})
-        return {"stores": stores, "meals": meals, "coupons": _merge_lists(coupons, store_coupons), "nutrition": nutrition, "store_id": store_id}
+        return {"stores": stores, "meals": meals, "coupons": _merge_lists(coupons, store_coupons), "nutrition": nutrition, "store_id": store_id, "be_code": be_code, "order_type": order_type, "be_type": be_type}
 
 
 def _parse_mcp_payload(raw: str) -> Any:
@@ -125,6 +155,9 @@ def _merge_lists(*values: Any) -> list[Any]:
         if isinstance(value, list):
             merged.extend(value)
         elif isinstance(value, dict):
+            if isinstance(value.get("data"), dict) and isinstance(value["data"].get("coupons"), list):
+                merged.extend(value["data"]["coupons"])
+                continue
             content = value.get("content")
             if isinstance(content, list):
                 for item in content:
@@ -140,6 +173,20 @@ def _merge_lists(*values: Any) -> list[Any]:
             else:
                 merged.append(value)
     return merged
+
+
+def _data_list(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        return [x for x in value if isinstance(x, dict)]
+    if isinstance(value, dict):
+        data = value.get("data")
+        if isinstance(data, list):
+            return [x for x in data if isinstance(x, dict)]
+        if isinstance(data, dict):
+            for key in ("stores", "items", "coupons"):
+                if isinstance(data.get(key), list):
+                    return [x for x in data[key] if isinstance(x, dict)]
+    return []
 
 
 def _first_id(value: Any, *keys: str) -> str | None:

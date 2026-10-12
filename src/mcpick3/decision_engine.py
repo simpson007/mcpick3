@@ -15,7 +15,7 @@ class DecisionEngine:
 
     @classmethod
     def from_context(cls, context: dict[str, Any]) -> "DecisionEngine":
-        meals = [_meal_from_any(x) for x in _as_list(context.get("meals"))]
+        meals = _extract_mcd_meals(context.get("meals"), context.get("nutrition"))
         coupons = [_coupon_from_any(x) for x in _as_list(context.get("coupons"))]
         return cls(meals, coupons)
 
@@ -116,6 +116,65 @@ def _as_list(value: Any) -> list[Any]:
             if isinstance(value.get(key), list):
                 return value[key]
     return []
+
+
+def _extract_mcd_meals(value: Any, nutrition: Any = None) -> list[Meal]:
+    """Adapt the official query-meals map and nutrition text to our model."""
+    if isinstance(value, dict):
+        data = value.get("data") if isinstance(value.get("data"), dict) else value
+        meal_map = data.get("meals") if isinstance(data, dict) else None
+        if isinstance(meal_map, dict):
+            category_by_code: dict[str, str] = {}
+            for category in data.get("categories", []) if isinstance(data, dict) else []:
+                if isinstance(category, dict):
+                    for item in category.get("meals", []):
+                        if isinstance(item, dict) and item.get("code"):
+                            category_by_code[str(item["code"])] = str(category.get("name") or "主食")
+            nutrition_map = _parse_nutrition(nutrition)
+            result = []
+            for code, item in meal_map.items():
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name") or code)
+                n = nutrition_map.get(name, {})
+                result.append(Meal(
+                    id=str(code), name=name,
+                    category=_category(category_by_code.get(str(code), "主食")),
+                    price=float(item.get("currentPrice") or item.get("price") or 0),
+                    kcal=float(n.get("kcal", 0)), protein=float(n.get("protein", 0)),
+                    tags=tuple(item.get("tags") or ()),
+                ))
+            return result
+    return [_meal_from_any(x) for x in _as_list(value)]
+
+
+def _category(label: str) -> str:
+    if any(x in label for x in ("小食", "薯", "鸡翅", "玉米")):
+        return "小食"
+    if any(x in label for x in ("饮料", "咖啡", "可乐", "饮品")):
+        return "饮料"
+    return "主食"
+
+
+def _parse_nutrition(value: Any) -> dict[str, dict[str, float]]:
+    if not isinstance(value, dict):
+        return {}
+    data = value.get("data")
+    if not isinstance(data, str):
+        return {}
+    output: dict[str, dict[str, float]] = {}
+    for line in data.splitlines():
+        line = line.strip()
+        if not line or line.startswith("[") or line.startswith("productName"):
+            continue
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) < 6:
+            continue
+        try:
+            output[parts[0]] = {"kcal": float(parts[3]), "protein": float(parts[4])}
+        except (ValueError, IndexError):
+            continue
+    return output
 
 
 def _meal_from_any(value: Any) -> Meal:
