@@ -28,13 +28,10 @@ def main() -> int:
         context = client.recommend_context(args.location)
     if args.live:
         engine = DecisionEngine.from_context(context)
-        cards = engine.generate(UserConstraints(args.budget, args.kcal, args.mode, args.minutes, args.location))
-        for card in cards:
-            try:
-                result = client.price_for_candidate(context, card.candidate)
-                engine.apply_official_prices([card], [result])
-            except Exception as exc:
-                card.evidence.append(f"calculate-price：实时校价失败（{exc}），保留菜单价")
+        cards = engine.generate(
+            UserConstraints(args.budget, args.kcal, args.mode, args.minutes, args.location),
+            verifier=lambda candidate: client.verify_candidate_model(context, candidate),
+        )
     else:
         cards = DecisionEngine.from_context(context).generate(UserConstraints(args.budget, args.kcal, args.mode, args.minutes, args.location))
     print(render_json(cards) if args.format == "json" else render_markdown(cards))

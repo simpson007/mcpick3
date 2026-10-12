@@ -8,10 +8,14 @@ def render_markdown(cards: list[DecisionCard]) -> str:
     lines = ["# 麦麦三问 · 今日决策卡", "", "> 营养信息、价格与供应状态以麦当劳官方实时结果为准。", ""]
     for card in cards:
         c = card.candidate
+        official = c.official_price or {}
+        price_line = f"- 到手价：¥{c.total:.2f}（原价 ¥{c.subtotal:.2f}，优惠 ¥{c.discount:.2f}）"
+        if official:
+            price_line += "｜官方实时校价"
         lines += [
             f"## {card.title}｜{card.subtitle}",
             f"**{' + '.join(c.meal_names)}**",
-            f"- 到手价：¥{c.total:.2f}（原价 ¥{c.subtotal:.2f}，优惠 ¥{c.discount:.2f}）",
+            price_line,
             f"- 能量：约 {c.kcal:.0f} kcal　蛋白质：约 {c.protein:.1f} g",
             f"- 推荐理由：{'；'.join(c.reasons)}",
             "- 证据：" + "；".join(card.evidence),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from typing import Any
@@ -42,17 +43,32 @@ class McdMcpClient:
         if self.session_id:
             headers["Mcp-Session-Id"] = self.session_id
         req = urllib.request.Request(self.url, json.dumps(payload).encode(), headers, method="POST")
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as response:
-                sid = response.headers.get("Mcp-Session-Id")
-                if sid:
-                    self.session_id = sid
-                raw = response.read().decode("utf-8")
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            raise McdMcpError(f"MCP HTTP {exc.code}: {detail[:300]}") from exc
-        except urllib.error.URLError as exc:
-            raise McdMcpError(f"MCP 网络请求失败: {exc.reason}") from exc
+        retries = 3 if _retryable_request(method, params) else 0
+        for attempt in range(retries + 1):
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as response:
+                    sid = response.headers.get("Mcp-Session-Id")
+                    if sid:
+                        self.session_id = sid
+                    raw = response.read().decode("utf-8")
+                    break
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace")
+                if exc.code in {429, 502, 503, 504} and attempt < retries:
+                    wait = min(2 ** attempt, 4)
+                    retry_after = exc.headers.get("Retry-After")
+                    try:
+                        wait = min(float(retry_after), 4) if retry_after else wait
+                    except ValueError:
+                        pass
+                    time.sleep(wait)
+                    continue
+                raise McdMcpError(f"MCP HTTP {exc.code}: {detail[:300]}") from exc
+            except urllib.error.URLError as exc:
+                if attempt < retries:
+                    time.sleep(min(2 ** attempt, 4))
+                    continue
+                raise McdMcpError(f"MCP 网络请求失败: {exc.reason}") from exc
         result = _parse_mcp_payload(raw)
         if isinstance(result, dict) and result.get("error"):
             raise McdMcpError(str(result["error"]))
@@ -113,6 +129,39 @@ class McdMcpClient:
             be_code=context.get("be_code"), order_type=context.get("order_type", 1),
         )
 
+    def verify_candidate(self, context: dict[str, Any], candidate: Any) -> Any:
+        """Verify all selected products with official detail and price tools."""
+        details = []
+        for meal in candidate.meals:
+            details.append(self.meal_detail(
+                context["store_id"], meal.product_code or meal.id,
+                be_type=context.get("be_type", 1), order_type=context.get("order_type", 1),
+                be_code=context.get("be_code"),
+            ))
+        price = self.price_for_candidate(context, candidate)
+        return {"details": details, "price": price}
+
+    def verify_candidate_model(self, context: dict[str, Any], candidate: Any) -> Any:
+        """Adapter used by DecisionEngine.generate(verifier=...)."""
+        result = self.verify_candidate(context, candidate)
+        details = result["details"]
+        for detail in details:
+            if isinstance(detail, dict) and detail.get("success") is False:
+                raise ValueError(detail.get("message", "餐品详情校验失败"))
+        price = result["price"]
+        if isinstance(price, dict) and price.get("success") is False:
+            raise ValueError(price.get("message", "价格校验失败"))
+        payload = price.get("data", {}) if isinstance(price, dict) else {}
+        if not isinstance(payload, dict) or payload.get("price") is None:
+            raise ValueError("价格响应缺少 price")
+        candidate.details = details
+        candidate.order_items = [{"productCode": m.product_code or m.id, "quantity": 1} for m in candidate.meals]
+        candidate.official_price = payload
+        candidate.total = float(payload["price"]) / 100
+        candidate.subtotal = float(payload.get("originalPrice", payload["price"])) / 100
+        candidate.discount = float(payload.get("discount", 0)) / 100
+        return candidate
+
     def recommend_context(
         self,
         location: str | None = None,
@@ -156,6 +205,16 @@ class McdMcpClient:
         store_coupons = self.call_tool("query-store-coupons", coupon_args)
         nutrition = self.call_tool("list-nutrition-foods", {})
         return {"stores": stores, "meals": meals, "coupons": _merge_lists(coupons, store_coupons), "nutrition": nutrition, "store_id": store_id, "be_code": be_code, "order_type": order_type, "be_type": be_type}
+
+
+def _retryable_request(method: str, params: dict[str, Any] | None) -> bool:
+    """Retry read-only MCP calls, never order creation/cancellation."""
+    if method in {"initialize", "tools/list", "ping"}:
+        return True
+    if method != "tools/call":
+        return False
+    tool = (params or {}).get("name", "")
+    return tool not in {"create-order", "cancel-order", "auto-bind-coupons", "delivery-create-address"}
 
 
 def _parse_mcp_payload(raw: str) -> Any:

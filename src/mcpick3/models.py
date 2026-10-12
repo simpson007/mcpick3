@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
+from math import isfinite
 from typing import Any, Literal
 
 
@@ -16,9 +17,9 @@ class UserConstraints:
     avoid: tuple[str, ...] = ()
 
     def validate(self) -> None:
-        if self.budget <= 0:
+        if not isfinite(self.budget) or self.budget <= 0:
             raise ValueError("预算必须大于 0")
-        if self.kcal_limit <= 0:
+        if not isfinite(self.kcal_limit) or self.kcal_limit <= 0:
             raise ValueError("热量上限必须大于 0")
         if self.minutes <= 0:
             raise ValueError("可接受等待时间必须大于 0")
@@ -68,6 +69,8 @@ class Candidate:
     score: float = 0
     reasons: list[str] = field(default_factory=list)
     official_price: dict[str, Any] | None = None
+    order_items: list[dict[str, Any]] = field(default_factory=list)
+    details: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def meal_names(self) -> list[str]:
@@ -97,6 +100,9 @@ class DecisionCard:
             "coupon": c.coupon.title if c.coupon else None,
             "product_codes": [m.product_code or m.id for m in c.meals],
             "official_price": c.official_price,
+            "price_verified": c.official_price is not None,
+            "order_items": c.order_items,
+            "details": c.details,
             "reasons": c.reasons,
             "evidence": self.evidence,
         }

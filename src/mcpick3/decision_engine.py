@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from itertools import combinations
-from typing import Iterable, Any
+from copy import deepcopy
+from typing import Iterable, Any, Callable
 
 from .models import Candidate, Coupon, DecisionCard, Meal, UserConstraints
 
@@ -19,7 +20,7 @@ class DecisionEngine:
         coupons = [_coupon_from_any(x) for x in _as_list(context.get("coupons")) if _is_coupon(x)]
         return cls(meals, coupons)
 
-    def generate(self, constraints: UserConstraints, limit: int = 3) -> list[DecisionCard]:
+    def generate(self, constraints: UserConstraints, limit: int = 3, *, verifier: Callable[[Candidate], Candidate] | None = None) -> list[DecisionCard]:
         constraints.validate()
         candidates = self._candidates(constraints)
         if not candidates:
@@ -31,27 +32,53 @@ class DecisionEngine:
         ]
         cards: list[DecisionCard] = []
         used: set[tuple[str, ...]] = set()
+        failures: set[tuple[str, ...]] = set()
+        verified: dict[tuple[str, ...], Candidate] = {}
         for mode, title, subtitle in modes[:limit]:
             ordered = sorted(candidates, key=lambda c: self._score(c, constraints, mode), reverse=True)
-            pick = next((c for c in ordered if tuple(m.id for m in c.meals) not in used), ordered[0])
+            pick = None
+            attempts = 0
+            for candidate in ordered:
+                key = tuple(m.id for m in candidate.meals)
+                if key in used or key in failures:
+                    continue
+                if verifier and key not in verified:
+                    attempts += 1
+                    if attempts > 5:
+                        break
+                    try:
+                        verified[key] = verifier(deepcopy(candidate))
+                    except ValueError:
+                        failures.add(key)
+                        continue
+                result = verified.get(key, candidate)
+                if result.total > constraints.budget:
+                    failures.add(key)
+                    continue
+                pick = deepcopy(result)
+                break
+            if pick is None:
+                continue
             used.add(tuple(m.id for m in pick.meals))
             pick.score = self._score(pick, constraints, mode)
             pick.reasons = self._reasons(pick, constraints, mode)
             cards.append(DecisionCard(mode, title, subtitle, pick, self._evidence(pick, constraints)))
+        if not cards:
+            raise ValueError("当前条件下没有通过实时校价的组合，请调整预算或门店后重试")
         return cards
 
     def apply_official_prices(self, cards: list[DecisionCard], price_results: list[Any]) -> list[DecisionCard]:
         """Overlay calculate-price responses while retaining local ranking."""
         for card, result in zip(cards, price_results):
             data = result.get("data", result) if isinstance(result, dict) else result
-            if isinstance(data, dict):
+            if isinstance(data, dict) and result.get("success", True) is not False:
+                total = _number(data, "price")
+                if total is None or total < 0:
+                    raise ValueError("校价响应缺少有效的 price（单位分）")
+                card.candidate.total = total / 100
+                card.candidate.subtotal = (_number(data, "originalPrice") or total) / 100
+                card.candidate.discount = (_number(data, "discount") or 0) / 100
                 card.candidate.official_price = data
-                total = _number(data, "realTotalAmount", "totalAmount", "payAmount", "actualAmount")
-                discount = _number(data, "totalDiscountAmount", "discountAmount")
-                if total is not None:
-                    card.candidate.total = total
-                if discount is not None:
-                    card.candidate.discount = discount
         return cards
 
     def _candidates(self, c: UserConstraints) -> list[Candidate]:
@@ -63,15 +90,19 @@ class DecisionEngine:
             for size in range(0, min(2, len(extras)) + 1):
                 for extra_tuple in combinations(extras, size):
                     selected = [main, *extra_tuple]
+                    if len({m.category for m in extra_tuple}) != len(extra_tuple):
+                        continue
                     if any(any(term.lower() in m.name.lower() for term in c.avoid) for m in selected):
                         continue
                     subtotal = sum(m.price for m in selected)
                     kcal = sum(m.kcal for m in selected)
-                    if subtotal > c.budget or kcal > c.kcal_limit:
+                    if kcal > c.kcal_limit:
                         continue
                     coupon = self._best_coupon(selected, subtotal)
                     discount = coupon.discount if coupon else 0
                     total = max(0, subtotal - discount)
+                    if total > c.budget:
+                        continue
                     result.append(Candidate(selected, subtotal, discount, total, kcal, sum(m.protein for m in selected), coupon))
         # De-duplicate exact combinations and retain those with strongest discount.
         unique: dict[tuple[str, ...], Candidate] = {}
@@ -101,7 +132,7 @@ class DecisionEngine:
 
     @staticmethod
     def _reasons(candidate: Candidate, c: UserConstraints, mode: str) -> list[str]:
-        reasons = [f"总价 ¥{candidate.total:.2f}，预算还剩 ¥{c.budget - candidate.total:.2f}", f"约 {candidate.kcal:.0f} kcal，低于 {c.kcal_limit:.0f} kcal 上限"]
+        reasons = [f"总价 ¥{candidate.total:.2f}，预算还剩 ¥{c.budget - candidate.total:.2f}", f"约 {candidate.kcal:.0f} kcal，不超过 {c.kcal_limit:.0f} kcal 上限"]
         if candidate.coupon:
             reasons.append(f"已匹配「{candidate.coupon.title}」，优惠 ¥{candidate.discount:.2f}")
         if mode == "balance":
@@ -114,12 +145,11 @@ class DecisionEngine:
 
     @staticmethod
     def _evidence(candidate: Candidate, c: UserConstraints) -> list[str]:
-        return [
-            "query-meals：确认餐品当前可售",
-            "list-nutrition-foods：读取能量与蛋白质信息",
-            "query-my-coupons / query-store-coupons：匹配可用优惠",
-            "calculate-price：按门店实时规则计算应付金额",
-        ]
+        if candidate.official_price is None:
+            return ["本地演示数据：菜单、营养与优惠均为样本", "本地估价：未调用官方 calculate-price"]
+        return ["query-meals：读取当前门店菜单", "list-nutrition-foods：按名称精确匹配营养数据",
+                "query-meal-detail：核验餐品默认组成", "query-store-coupons：查询门店可用券（未自动领券）",
+                "calculate-price：官方实时校价，金额从分换算为元"]
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -156,22 +186,24 @@ def _extract_mcd_meals(value: Any, nutrition: Any = None) -> list[Meal]:
                     continue
                 result.append(Meal(
                     id=str(code), name=name,
-                    category=_category(category_by_code.get(str(code), "主食")),
+                    category=_category(name),
                     price=float(item.get("currentPrice") or item.get("price") or 0),
                     kcal=float(n.get("kcal", 0)), protein=float(n.get("protein", 0)),
                     product_code=str(code),
                     original_price=float(item.get("originalPrice") or item.get("currentPrice") or 0),
                     image=item.get("image"),
-                    tags=tuple(item.get("tags") or ()),
+                    tags=tuple(item.get("tags") or ()) + (("满足感",) if any(x in name for x in ("辣", "双层", "巨无霸", "厚牛")) else ()),
                 ))
             return result
     return [_meal_from_any(x) for x in _as_list(value)]
 
 
 def _category(label: str) -> str:
-    if any(x in label for x in ("小食", "薯", "鸡翅", "玉米")):
+    if any(x in label for x in ("堡", "麦满分", "卷")):
+        return "主食"
+    if any(x in label for x in ("小食", "薯", "鸡翅", "玉米", "冰淇淋", "麦旋风", "派", "麦乐鸡", "油条", "新地", "鸡排")):
         return "小食"
-    if any(x in label for x in ("饮料", "咖啡", "可乐", "饮品")):
+    if any(x in label for x in ("饮料", "咖啡", "可乐", "饮品", "奶", "茶", "雪碧", "美式", "拿铁", "水")):
         return "饮料"
     return "主食"
 
