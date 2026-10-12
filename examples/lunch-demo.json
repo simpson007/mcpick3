@@ -1,0 +1,7 @@
+{
+  "budget": 35,
+  "kcal_limit": 700,
+  "minutes": 25,
+  "pickup_mode": "pickup",
+  "prompt": "午休25分钟，预算35元，热量不超过700 kcal，想吃得有满足感。"
+}
