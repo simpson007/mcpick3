@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+import socket
 import urllib.error
 import urllib.request
 from typing import Any
@@ -64,11 +65,11 @@ class McdMcpClient:
                     time.sleep(wait)
                     continue
                 raise McdMcpError(f"MCP HTTP {exc.code}: {detail[:300]}") from exc
-            except urllib.error.URLError as exc:
+            except (urllib.error.URLError, socket.timeout, TimeoutError) as exc:
                 if attempt < retries:
                     time.sleep(min(2 ** attempt, 4))
                     continue
-                raise McdMcpError(f"MCP 网络请求失败: {exc.reason}") from exc
+                raise McdMcpError(f"MCP 网络请求失败: {getattr(exc, 'reason', '请求超时')}") from exc
         result = _parse_mcp_payload(raw)
         if isinstance(result, dict) and result.get("error"):
             raise McdMcpError(str(result["error"]))
@@ -82,7 +83,23 @@ class McdMcpClient:
         return self._rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "mcpick3", "version": "0.1.0"}})
 
     def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
-        return self._rpc("tools/call", {"name": name, "arguments": arguments or {}})
+        result = self._rpc("tools/call", {"name": name, "arguments": arguments or {}})
+        if isinstance(result, dict) and (result.get("isError") is True or result.get("success") is False):
+            raise McdMcpError(f"{name}：{result.get('message') or '官方工具返回错误'}")
+        return result
+
+    def search_stores(self, city: str, keyword: str, *, be_type: int = 1) -> list[dict[str, Any]]:
+        if be_type not in (1, 5):
+            raise ValueError("当前版本支持到店取餐和得来速；外送与团餐需要单独的配送地址流程")
+        if not city.strip() or not keyword.strip():
+            raise ValueError("请同时输入城市和附近位置关键词")
+        stores = self.call_tool("query-nearby-stores", {
+            "searchType": 2, "beType": be_type, "city": city.strip(), "keyword": keyword.strip(),
+        })
+        rows = _data_list(stores)
+        if not rows:
+            raise ValueError("没有找到门店，请更换城市或关键词")
+        return rows
 
     def calculate_price(
         self,
@@ -155,6 +172,10 @@ class McdMcpClient:
         if not isinstance(payload, dict) or payload.get("price") is None:
             raise ValueError("价格响应缺少 price")
         candidate.details = details
+        if any((detail.get("data") or {}).get("rounds") for detail in details):
+            # No silent default combo ordering until all constituent nutrition
+            # and required round selections have been explicitly validated.
+            raise ValueError("此套餐含选配轮次，当前版本仅推荐营养完整的单品组合")
         candidate.order_items = [{"productCode": m.product_code or m.id, "quantity": 1} for m in candidate.meals]
         candidate.official_price = payload
         candidate.total = float(payload["price"]) / 100
@@ -169,12 +190,15 @@ class McdMcpClient:
         city: str | None = None,
         keyword: str | None = None,
         be_type: int = 1,
+        store_code: str | None = None,
     ) -> dict[str, Any]:
         """Fetch the MCP data needed by the decision engine.
 
         Tool argument schemas can evolve; callers may pass a prebuilt context to
         the engine when the MCP service returns a schema-specific response.
         """
+        if be_type not in (1, 5):
+            raise ValueError("当前版本支持到店取餐和得来速；外送与团餐需要单独的配送地址流程")
         self.initialize()
         if city or keyword or location:
             city = city or location
@@ -188,7 +212,14 @@ class McdMcpClient:
         store_rows = _data_list(stores)
         if not store_rows:
             raise McdMcpError("没有找到可用门店；请同时提供城市和附近位置关键词")
-        first_store = store_rows[0]
+        if store_code:
+            first_store = next((s for s in store_rows if s.get("storeCode") == store_code), None)
+            if first_store is None:
+                raise ValueError("所选门店不在当前搜索结果中，请重新选择")
+        else:
+            first_store = next((s for s in store_rows if s.get("businessStatus") is True), store_rows[0])
+        if first_store.get("businessStatus") is False:
+            raise ValueError("所选门店当前暂停营业，请选择其他门店")
         store_id = _first_id(first_store, "storeCode", "storeId", "id")
         if not store_id:
             raise McdMcpError("门店响应缺少 storeCode")
@@ -204,7 +235,7 @@ class McdMcpClient:
             coupon_args["beCode"] = be_code
         store_coupons = self.call_tool("query-store-coupons", coupon_args)
         nutrition = self.call_tool("list-nutrition-foods", {})
-        return {"stores": stores, "meals": meals, "coupons": _merge_lists(coupons, store_coupons), "nutrition": nutrition, "store_id": store_id, "be_code": be_code, "order_type": order_type, "be_type": be_type}
+        return {"stores": stores, "selected_store": first_store, "meals": meals, "coupons": _merge_lists(store_coupons), "my_coupons": coupons, "nutrition": nutrition, "store_id": store_id, "be_code": be_code, "order_type": order_type, "be_type": be_type, "live": True}
 
 
 def _retryable_request(method: str, params: dict[str, Any] | None) -> bool:
@@ -214,7 +245,7 @@ def _retryable_request(method: str, params: dict[str, Any] | None) -> bool:
     if method != "tools/call":
         return False
     tool = (params or {}).get("name", "")
-    return tool not in {"create-order", "cancel-order", "auto-bind-coupons", "delivery-create-address"}
+    return tool in {"query-nearby-stores", "query-meals", "query-meal-detail", "calculate-price", "query-my-coupons", "query-store-coupons", "list-nutrition-foods"}
 
 
 def _parse_mcp_payload(raw: str) -> Any:

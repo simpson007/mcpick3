@@ -17,7 +17,9 @@ class DecisionEngine:
     @classmethod
     def from_context(cls, context: dict[str, Any]) -> "DecisionEngine":
         meals = _extract_mcd_meals(context.get("meals"), context.get("nutrition"))
-        coupons = [_coupon_from_any(x) for x in _as_list(context.get("coupons")) if _is_coupon(x)]
+        # Official coupons include eligibility/product rules that differ from
+        # the demo's fixed discount model. Do not invent discounts for live data.
+        coupons = [] if context.get("live") else [_coupon_from_any(x) for x in _as_list(context.get("coupons")) if _is_coupon(x)]
         return cls(meals, coupons)
 
     def generate(self, constraints: UserConstraints, limit: int = 3, *, verifier: Callable[[Candidate], Candidate] | None = None) -> list[DecisionCard]:
@@ -205,7 +207,9 @@ def _category(label: str) -> str:
         return "小食"
     if any(x in label for x in ("饮料", "咖啡", "可乐", "饮品", "奶", "茶", "雪碧", "美式", "拿铁", "水")):
         return "饮料"
-    return "主食"
+    if any(x in label for x in ("苹果", "蔬", "沙拉")):
+        return "小食"
+    return "其他"
 
 
 def _parse_nutrition(value: Any) -> dict[str, dict[str, float]]:
