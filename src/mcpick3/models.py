@@ -37,6 +37,9 @@ class Meal:
     tags: tuple[str, ...] = ()
     prep_minutes: int = 10
     available: bool = True
+    product_code: str | None = None
+    original_price: float | None = None
+    image: str | None = None
 
 
 @dataclass(frozen=True)
@@ -64,6 +67,7 @@ class Candidate:
     coupon: Coupon | None
     score: float = 0
     reasons: list[str] = field(default_factory=list)
+    official_price: dict[str, Any] | None = None
 
     @property
     def meal_names(self) -> list[str]:
@@ -91,6 +95,8 @@ class DecisionCard:
             "kcal": round(c.kcal),
             "protein_g": round(c.protein, 1),
             "coupon": c.coupon.title if c.coupon else None,
+            "product_codes": [m.product_code or m.id for m in c.meals],
+            "official_price": c.official_price,
             "reasons": c.reasons,
             "evidence": self.evidence,
         }

@@ -99,6 +99,20 @@ class McdMcpClient:
             args["takeWayCode"] = take_way_code
         return self.call_tool("create-order", args)
 
+    def meal_detail(self, store_code: str, product_code: str, *, be_type: int = 1, order_type: int = 1, be_code: str | None = None) -> Any:
+        args: dict[str, Any] = {"storeCode": store_code, "orderType": order_type, "beType": be_type, "code": product_code}
+        if be_code:
+            args["beCode"] = be_code
+        return self.call_tool("query-meal-detail", args)
+
+    def price_for_candidate(self, context: dict[str, Any], candidate: Any) -> Any:
+        """Calculate official price for a Candidate without creating an order."""
+        items = [{"productCode": m.product_code or m.id, "quantity": 1} for m in candidate.meals]
+        return self.calculate_price(
+            context["store_id"], items, be_type=context.get("be_type", 1),
+            be_code=context.get("be_code"), order_type=context.get("order_type", 1),
+        )
+
     def recommend_context(
         self,
         location: str | None = None,

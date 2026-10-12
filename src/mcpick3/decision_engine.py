@@ -16,7 +16,7 @@ class DecisionEngine:
     @classmethod
     def from_context(cls, context: dict[str, Any]) -> "DecisionEngine":
         meals = _extract_mcd_meals(context.get("meals"), context.get("nutrition"))
-        coupons = [_coupon_from_any(x) for x in _as_list(context.get("coupons"))]
+        coupons = [_coupon_from_any(x) for x in _as_list(context.get("coupons")) if _is_coupon(x)]
         return cls(meals, coupons)
 
     def generate(self, constraints: UserConstraints, limit: int = 3) -> list[DecisionCard]:
@@ -38,6 +38,20 @@ class DecisionEngine:
             pick.score = self._score(pick, constraints, mode)
             pick.reasons = self._reasons(pick, constraints, mode)
             cards.append(DecisionCard(mode, title, subtitle, pick, self._evidence(pick, constraints)))
+        return cards
+
+    def apply_official_prices(self, cards: list[DecisionCard], price_results: list[Any]) -> list[DecisionCard]:
+        """Overlay calculate-price responses while retaining local ranking."""
+        for card, result in zip(cards, price_results):
+            data = result.get("data", result) if isinstance(result, dict) else result
+            if isinstance(data, dict):
+                card.candidate.official_price = data
+                total = _number(data, "realTotalAmount", "totalAmount", "payAmount", "actualAmount")
+                discount = _number(data, "totalDiscountAmount", "discountAmount")
+                if total is not None:
+                    card.candidate.total = total
+                if discount is not None:
+                    card.candidate.discount = discount
         return cards
 
     def _candidates(self, c: UserConstraints) -> list[Candidate]:
@@ -136,12 +150,18 @@ def _extract_mcd_meals(value: Any, nutrition: Any = None) -> list[Meal]:
                 if not isinstance(item, dict):
                     continue
                 name = str(item.get("name") or code)
-                n = nutrition_map.get(name, {})
+                n = nutrition_map.get(name)
+                if not n:
+                    # A meal without nutrition data must not masquerade as 0 kcal.
+                    continue
                 result.append(Meal(
                     id=str(code), name=name,
                     category=_category(category_by_code.get(str(code), "主食")),
                     price=float(item.get("currentPrice") or item.get("price") or 0),
                     kcal=float(n.get("kcal", 0)), protein=float(n.get("protein", 0)),
+                    product_code=str(code),
+                    original_price=float(item.get("originalPrice") or item.get("currentPrice") or 0),
+                    image=item.get("image"),
                     tags=tuple(item.get("tags") or ()),
                 ))
             return result
@@ -187,6 +207,9 @@ def _meal_from_any(value: Any) -> Meal:
         price=float(value.get("price") or value.get("salePrice") or 0),
         kcal=float(value.get("kcal") or value.get("energy") or value.get("calories") or 0),
         protein=float(value.get("protein") or value.get("protein_g") or 0),
+        product_code=str(value.get("product_code") or value.get("productCode") or value.get("id") or "") or None,
+        original_price=float(value.get("original_price") or value.get("originalPrice") or value.get("price") or 0),
+        image=value.get("image"),
         tags=tuple(value.get("tags") or ()),
         prep_minutes=int(value.get("prep_minutes") or value.get("prepMinutes") or 10),
         available=bool(value.get("available", True)),
@@ -203,3 +226,21 @@ def _coupon_from_any(value: Any) -> Coupon:
         min_spend=float(value.get("min_spend") or value.get("minSpend") or 0),
         meal_ids=tuple(value.get("meal_ids") or value.get("mealIds") or ()),
     )
+
+
+def _is_coupon(value: Any) -> bool:
+    return isinstance(value, Coupon) or (
+        isinstance(value, dict)
+        and bool(value.get("id") or value.get("couponId") or value.get("code"))
+        and bool(value.get("title") or value.get("name") or value.get("discountInfo"))
+    )
+
+
+def _number(value: dict[str, Any], *keys: str) -> float | None:
+    for key in keys:
+        if value.get(key) is not None:
+            try:
+                return float(value[key])
+            except (TypeError, ValueError):
+                pass
+    return None
