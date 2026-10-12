@@ -60,11 +60,46 @@ def recommendations(constraints: UserConstraints, *, live: bool = False, city: s
 
 def _detail_summary(data: dict[str, Any]) -> dict[str, Any]:
     """Show default composition and modify flag, not unsolicited modification lists."""
+    data = _unwrap_detail(data)
     defaults = []
-    for round_ in data.get("rounds", []):
-        for choice in round_.get("choices", []):
-            if choice.get("isDefault") == 1:
-                defaults.append({"name": choice.get("name", ""), "code": choice.get("code", ""),
-                                 "supportModify": bool(choice.get("supportModify"))})
+    options = []
+    for round_ in _detail_rounds(data):
+        round_name = round_.get("name") or round_.get("roundName") or round_.get("title") or "可选项"
+        choices = round_.get("choices") or round_.get("choiceList") or round_.get("items") or []
+        if not isinstance(choices, list):
+            continue
+        round_options = []
+        for choice in choices:
+            if not isinstance(choice, dict):
+                continue
+            item = {"name": choice.get("name", ""), "code": choice.get("code") or choice.get("productCode", ""),
+                    "supportModify": bool(choice.get("supportModify")),
+                    "default": choice.get("isDefault") in (1, True, "1", "true")}
+            round_options.append(item)
+            if item["default"]:
+                defaults.append(item)
+        if round_options:
+            options.append({"name": round_name, "choices": round_options})
     return {"code": data.get("code"), "name": data.get("name"),
-            "supportModify": bool(data.get("supportModify")), "defaults": defaults}
+            "supportModify": bool(data.get("supportModify")), "defaults": defaults, "options": options}
+
+
+def _unwrap_detail(value: Any) -> dict[str, Any]:
+    """Accept both structuredContent and common MCP data envelopes."""
+    if not isinstance(value, dict):
+        return {}
+    current = value
+    for _ in range(3):
+        nested = current.get("data")
+        if isinstance(nested, dict) and (not current.get("rounds") and not current.get("roundList")):
+            current = nested
+        else:
+            break
+    return current
+
+
+def _detail_rounds(data: dict[str, Any]) -> list[dict[str, Any]]:
+    rounds = data.get("rounds") or data.get("roundList") or data.get("roundsList") or []
+    if isinstance(rounds, dict):
+        rounds = rounds.get("items") or rounds.get("list") or []
+    return [item for item in rounds if isinstance(item, dict)] if isinstance(rounds, list) else []

@@ -3,6 +3,7 @@ import unittest
 from mcpick3.decision_engine import DecisionEngine
 from mcpick3.mcp_client import DemoMcpClient
 from mcpick3.models import ReplacementRequest, UserConstraints
+from mcpick3.service import _detail_summary
 
 
 class DecisionEngineTest(unittest.TestCase):
@@ -39,3 +40,14 @@ class DecisionEngineTest(unittest.TestCase):
                                       excluded_keys={engine._key(first.candidate)},
                                       replacement=request)[0]
         self.assertLess(replacement.candidate.total, first.candidate.total)
+
+    def test_detail_summary_supports_round_list_and_defaults(self):
+        summary = _detail_summary({"data": {"name": "示例套餐", "roundList": [
+            {"roundName": "饮料", "choiceList": [
+                {"name": "冰露", "code": "d2", "isDefault": 1},
+                {"name": "可乐", "code": "d1", "isDefault": 0},
+            ]}
+        ]}})
+        self.assertEqual(summary["name"], "示例套餐")
+        self.assertEqual(summary["defaults"][0]["code"], "d2")
+        self.assertEqual(summary["options"][0]["choices"][1]["name"], "可乐")

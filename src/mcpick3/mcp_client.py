@@ -172,11 +172,11 @@ class McdMcpClient:
         if not isinstance(payload, dict) or payload.get("price") is None:
             raise ValueError("价格响应缺少 price")
         candidate.details = details
-        if any((detail.get("data") or {}).get("rounds") for detail in details):
-            # No silent default combo ordering until all constituent nutrition
-            # and required round selections have been explicitly validated.
-            raise ValueError("此套餐含选配轮次，当前版本仅推荐营养完整的单品组合")
-        candidate.order_items = [{"productCode": m.product_code or m.id, "quantity": 1} for m in candidate.meals]
+        # Keep the official product structure in the draft. The selected
+        # default choices are visible to the user and can be rechecked before
+        # any future order flow; no order is created here.
+        candidate.order_items = [_default_order_item(meal, detail)
+                                 for meal, detail in zip(candidate.meals, details)]
         candidate.official_price = payload
         candidate.total = float(payload["price"]) / 100
         candidate.subtotal = float(payload.get("originalPrice", payload["price"])) / 100
@@ -326,6 +326,33 @@ def _first_id(value: Any, *keys: str) -> str | None:
             if found:
                 return found
     return None
+
+
+def _has_detail_rounds(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    data = value.get("data") if isinstance(value.get("data"), dict) else value
+    return bool(data.get("rounds") or data.get("roundList") or data.get("roundsList"))
+
+
+def _default_order_item(meal: Any, detail: Any) -> dict[str, Any]:
+    item = {"productCode": meal.product_code or meal.id, "quantity": 1}
+    data = detail.get("data", detail) if isinstance(detail, dict) else {}
+    if not isinstance(data, dict):
+        return item
+    rounds = data.get("rounds") or data.get("roundList") or data.get("roundsList") or []
+    selections = []
+    for round_ in rounds if isinstance(rounds, list) else []:
+        choices = round_.get("choices") or round_.get("choiceList") or round_.get("items") or []
+        for choice in choices if isinstance(choices, list) else []:
+            if isinstance(choice, dict) and choice.get("isDefault") in (1, True, "1", "true"):
+                selections.append({"roundCode": round_.get("code") or round_.get("roundCode"),
+                                   "productCode": choice.get("code") or choice.get("productCode"),
+                                   "quantity": 1})
+                break
+    if selections:
+        item["roundItems"] = selections
+    return item
 
 
 class DemoMcpClient:
