@@ -19,3 +19,12 @@ class DecisionEngineTest(unittest.TestCase):
     def test_invalid_constraints(self):
         with self.assertRaisesRegex(ValueError, "预算"):
             DecisionEngine([]).generate(UserConstraints(0, 700))
+
+    def test_excluded_combination_is_not_returned(self):
+        context = DemoMcpClient().recommend_context()
+        engine = DecisionEngine.from_context(context)
+        first = engine.generate(UserConstraints(35, 700), limit=1)[0]
+        excluded = tuple(m.id for m in first.candidate.meals)
+        second = engine.generate(UserConstraints(35, 700), limit=1,
+                                 excluded_keys={excluded})[0]
+        self.assertNotEqual(tuple(m.id for m in second.candidate.meals), excluded)
