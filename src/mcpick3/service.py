@@ -27,7 +27,7 @@ def recommendations(constraints: UserConstraints, *, live: bool = False, city: s
         cards = engine.generate(constraints, verifier=lambda c: client.verify_candidate_model(context, c),
                                 excluded_keys=excluded_keys, replacement=replacement_request)
         store = context["selected_store"]
-        warnings.append("这次只挑了营养信息完整、刚刚校过价的单品；套餐和优惠券组合还没算进去。")
+        warnings.append("这次只挑了营养信息完整、刚刚校过价的餐品；套餐默认组成会展示在明细里。")
     else:
         context = DemoMcpClient().recommend_context()
         engine = DecisionEngine.from_context(context)
