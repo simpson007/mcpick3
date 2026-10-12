@@ -6,13 +6,14 @@ from typing import Any
 
 from .decision_engine import DecisionEngine
 from .mcp_client import DemoMcpClient, McdMcpClient
-from .models import UserConstraints
+from .models import ReplacementRequest, UserConstraints
 
 
 def recommendations(constraints: UserConstraints, *, live: bool = False, city: str = "",
                     keyword: str = "", store_code: str | None = None, be_type: int = 1,
                     client: McdMcpClient | None = None,
-                    exclude: list[list[str]] | None = None) -> dict[str, Any]:
+                    exclude: list[list[str]] | None = None,
+                    replacement: dict[str, Any] | None = None) -> dict[str, Any]:
     constraints.validate()
     if constraints.pickup_mode == "delivery":
         raise ValueError("外送功能尚未接入，请选择到店取餐或堂食")
@@ -22,15 +23,17 @@ def recommendations(constraints: UserConstraints, *, live: bool = False, city: s
         context = client.recommend_context(city=city, keyword=keyword, store_code=store_code, be_type=be_type)
         engine = DecisionEngine.from_context(context)
         excluded_keys = {tuple(str(x) for x in group) for group in (exclude or [])}
+        replacement_request = ReplacementRequest(**replacement) if replacement else None
         cards = engine.generate(constraints, verifier=lambda c: client.verify_candidate_model(context, c),
-                                excluded_keys=excluded_keys)
+                                excluded_keys=excluded_keys, replacement=replacement_request)
         store = context["selected_store"]
         warnings.append("这次只挑了营养信息完整、刚刚校过价的单品；套餐和优惠券组合还没算进去。")
     else:
         context = DemoMcpClient().recommend_context()
         engine = DecisionEngine.from_context(context)
         excluded_keys = {tuple(str(x) for x in group) for group in (exclude or [])}
-        cards = engine.generate(constraints, excluded_keys=excluded_keys)
+        replacement_request = ReplacementRequest(**replacement) if replacement else None
+        cards = engine.generate(constraints, excluded_keys=excluded_keys, replacement=replacement_request)
         store = {"storeCode": "demo-store", "storeName": "演示门店", "address": "本地样本，不代表真实供应"}
         warnings.append("现在是演示数据；切到实时 MCP 才会查真实门店和价格。")
     serialized = []

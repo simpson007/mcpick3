@@ -28,6 +28,29 @@ class UserConstraints:
 
 
 @dataclass(frozen=True)
+class ReplacementRequest:
+    """Replace one card, retaining its role and the user's original limits."""
+
+    mode: str
+    preference: str = "any"
+    reference_total: float | None = None
+    reference_kcal: float | None = None
+
+    def validate(self) -> None:
+        if self.mode not in {"save", "balance", "mood"}:
+            raise ValueError("卡片类型应为 save、balance 或 mood")
+        if self.preference not in {"any", "cheaper", "lighter"}:
+            raise ValueError("替换方向应为 any、cheaper 或 lighter")
+        for label, value in (("原卡片价格", self.reference_total), ("原卡片热量", self.reference_kcal)):
+            if value is not None and (not isfinite(value) or value < 0):
+                raise ValueError(f"{label}应为有效的非负数")
+        if self.preference == "cheaper" and self.reference_total is None:
+            raise ValueError("便宜点需要原卡片价格")
+        if self.preference == "lighter" and self.reference_kcal is None:
+            raise ValueError("低卡点需要原卡片热量")
+
+
+@dataclass(frozen=True)
 class Meal:
     id: str
     name: str

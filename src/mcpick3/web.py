@@ -79,7 +79,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("实时模式请同时输入城市和位置关键词")
                 result = recommendations(constraints, live=source == "live", city=city, keyword=keyword,
                                          store_code=str(data["storeCode"]) if data.get("storeCode") else None,
-                                         exclude=data.get("exclude") if isinstance(data.get("exclude"), list) else None)
+                                         exclude=data.get("exclude") if isinstance(data.get("exclude"), list) else None,
+                                         replacement=data.get("replacement") if isinstance(data.get("replacement"), dict) else None)
                 self._send(result)
             else:
                 self._send({"error": "路径不存在；当前网页仅提供查询和草稿"}, 404)

@@ -4,7 +4,7 @@ from itertools import combinations
 from copy import deepcopy
 from typing import Iterable, Any, Callable
 
-from .models import Candidate, Coupon, DecisionCard, Meal, UserConstraints
+from .models import Candidate, Coupon, DecisionCard, Meal, ReplacementRequest, UserConstraints
 
 
 class DecisionEngine:
@@ -23,9 +23,12 @@ class DecisionEngine:
         return cls(meals, coupons)
 
     def generate(self, constraints: UserConstraints, limit: int = 3, *, verifier: Callable[[Candidate], Candidate] | None = None,
-                 excluded_keys: set[tuple[str, ...]] | None = None) -> list[DecisionCard]:
+                 excluded_keys: set[tuple[str, ...]] | None = None,
+                 replacement: ReplacementRequest | None = None) -> list[DecisionCard]:
         constraints.validate()
-        excluded_keys = excluded_keys or set()
+        if replacement:
+            replacement.validate()
+        excluded_keys = {tuple(sorted(key)) for key in (excluded_keys or set())}
         candidates = self._candidates(constraints)
         if not candidates:
             raise ValueError("没有同时满足预算和热量上限的可售组合，请放宽一个条件")
@@ -34,6 +37,8 @@ class DecisionEngine:
             ("balance", "稳妥一餐", "价格、能量都不冒险"),
             ("mood", "今天就吃它", "想吃的那口，直接安排"),
         ]
+        if replacement:
+            modes = [m for m in modes if m[0] == replacement.mode]
         cards: list[DecisionCard] = []
         used: set[tuple[str, ...]] = set()
         failures: set[tuple[str, ...]] = set()
@@ -43,7 +48,7 @@ class DecisionEngine:
             pick = None
             attempts = 0
             for candidate in ordered:
-                key = tuple(m.id for m in candidate.meals)
+                key = self._key(candidate)
                 if key in used or key in failures or key in excluded_keys:
                     continue
                 if verifier and key not in verified:
@@ -56,20 +61,34 @@ class DecisionEngine:
                         failures.add(key)
                         continue
                 result = verified.get(key, candidate)
-                if result.total > constraints.budget:
+                if result.total > constraints.budget or result.kcal > constraints.kcal_limit:
                     failures.add(key)
+                    continue
+                if replacement and not self._matches_replacement(result, replacement):
                     continue
                 pick = deepcopy(result)
                 break
             if pick is None:
                 continue
-            used.add(tuple(m.id for m in pick.meals))
+            used.add(self._key(pick))
             pick.score = self._score(pick, constraints, mode)
             pick.reasons = self._reasons(pick, constraints, mode)
             cards.append(DecisionCard(mode, title, subtitle, pick, self._evidence(pick, constraints)))
         if not cards:
             raise ValueError("当前条件下没有通过实时校价的组合，请调整预算或门店后重试")
         return cards
+
+    @staticmethod
+    def _key(candidate: Candidate) -> tuple[str, ...]:
+        return tuple(sorted(m.id for m in candidate.meals))
+
+    @staticmethod
+    def _matches_replacement(candidate: Candidate, request: ReplacementRequest) -> bool:
+        if request.preference == "cheaper":
+            return candidate.total < (request.reference_total or 0)
+        if request.preference == "lighter":
+            return candidate.kcal < (request.reference_kcal or 0)
+        return True
 
     def apply_official_prices(self, cards: list[DecisionCard], price_results: list[Any]) -> list[DecisionCard]:
         """Overlay calculate-price responses while retaining local ranking."""

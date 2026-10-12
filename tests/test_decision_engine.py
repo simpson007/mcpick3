@@ -2,7 +2,7 @@ import unittest
 
 from mcpick3.decision_engine import DecisionEngine
 from mcpick3.mcp_client import DemoMcpClient
-from mcpick3.models import UserConstraints
+from mcpick3.models import ReplacementRequest, UserConstraints
 
 
 class DecisionEngineTest(unittest.TestCase):
@@ -28,3 +28,14 @@ class DecisionEngineTest(unittest.TestCase):
         second = engine.generate(UserConstraints(35, 700), limit=1,
                                  excluded_keys={excluded})[0]
         self.assertNotEqual(tuple(m.id for m in second.candidate.meals), excluded)
+
+    def test_cheaper_replacement_stays_below_reference_price(self):
+        context = DemoMcpClient().recommend_context()
+        engine = DecisionEngine.from_context(context)
+        first = engine.generate(UserConstraints(35, 700), limit=1)[0]
+        request = ReplacementRequest("save", "cheaper", reference_total=first.candidate.total,
+                                     reference_kcal=first.candidate.kcal)
+        replacement = engine.generate(UserConstraints(35, 700), limit=1,
+                                      excluded_keys={engine._key(first.candidate)},
+                                      replacement=request)[0]
+        self.assertLess(replacement.candidate.total, first.candidate.total)
