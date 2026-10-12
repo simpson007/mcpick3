@@ -43,6 +43,28 @@ calculate-price（对候选卡做最终价格确认）
 输出三张卡 → 用户确认 → create-order
 ```
 
+## 连接自检
+
+网页实时模式的「先做连接自检」只执行只读调用：`initialize` 和
+`query-nearby-stores`。它会告诉你 Token 是否被读取、MCP 是否可连通以及找到多少家门店，
+不会调用下单、支付、领券或地址接口，也不会把 Token 写进页面或日志。
+
+命令行中也可以使用同一逻辑：
+
+```python
+from mcpick3.mcp_client import McdMcpClient
+
+print(McdMcpClient().diagnostics("YOUR_CITY", "YOUR_NEARBY_KEYWORD"))
+```
+
+可能的结果：
+
+```text
+{'ok': True, 'stage': 'query-nearby-stores', 'message': '官方 MCP 连接正常', ...}
+```
+
+凭证缺失、网络错误和上游错误只返回脱敏诊断，不回显 Token。
+
 MVP 的 `McdMcpClient` 负责连接和工具调用；因官方工具参数可能按版本更新，`recommend_context` 将原始返回交给适配层，避免把某一时刻的字段写死。`DemoMcpClient` 提供无 Token 的本地演示与测试数据。
 
 ## 业务价值
