@@ -22,8 +22,10 @@ class DecisionEngine:
         coupons = [] if context.get("live") else [_coupon_from_any(x) for x in _as_list(context.get("coupons")) if _is_coupon(x)]
         return cls(meals, coupons)
 
-    def generate(self, constraints: UserConstraints, limit: int = 3, *, verifier: Callable[[Candidate], Candidate] | None = None) -> list[DecisionCard]:
+    def generate(self, constraints: UserConstraints, limit: int = 3, *, verifier: Callable[[Candidate], Candidate] | None = None,
+                 excluded_keys: set[tuple[str, ...]] | None = None) -> list[DecisionCard]:
         constraints.validate()
+        excluded_keys = excluded_keys or set()
         candidates = self._candidates(constraints)
         if not candidates:
             raise ValueError("没有同时满足预算和热量上限的可售组合，请放宽一个条件")
@@ -42,7 +44,7 @@ class DecisionEngine:
             attempts = 0
             for candidate in ordered:
                 key = tuple(m.id for m in candidate.meals)
-                if key in used or key in failures:
+                if key in used or key in failures or key in excluded_keys:
                     continue
                 if verifier and key not in verified:
                     attempts += 1
