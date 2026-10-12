@@ -121,6 +121,7 @@ class DecisionCard:
             "kcal": round(c.kcal),
             "protein_g": round(c.protein, 1),
             "coupon": c.coupon.title if c.coupon else None,
+            "meal_ids": [m.id for m in c.meals],
             "product_codes": [m.product_code or m.id for m in c.meals],
             "official_price": c.official_price,
             "price_verified": c.official_price is not None,
