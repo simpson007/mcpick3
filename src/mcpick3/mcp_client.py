@@ -80,7 +80,7 @@ class McdMcpClient:
         return result
 
     def initialize(self) -> Any:
-        return self._rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "mcpick3", "version": "0.1.0"}})
+        return self._rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "mcpick3", "version": "0.3.0"}})
 
     def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
         result = self._rpc("tools/call", {"name": name, "arguments": arguments or {}})
